@@ -8,3 +8,111 @@ generator client {
 datasource db {
   provider = "sqlite"
 }
+
+model User {
+  id   String   @id @default(cuid())
+  name String
+  role UserRole /// defines permisisons; can be ADVISOR or COMPLIANCE
+
+  /// only used for advisors; compliance users can query any client - service enforces this
+  clients Client[]
+}
+
+model Client {
+  id    String @id @default(cuid())
+  name  String
+  email String
+
+  advisorId String
+  advisor   User   @relation(fields: [advisorId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  deliveries Delivery[]
+}
+
+model Fund {
+  id   String @id @default(cuid())
+  name String
+
+  disclosureDocuments DisclosureDocument[]
+}
+
+model DisclosureDocument {
+  id      String
+  version Int
+
+  publishedAt DateTime
+
+  fundId String
+  fund   Fund   @relation(fields: [fundId], references: [id], onDelete: Cascade, onUpdate: Restrict)
+
+  deliveries Delivery[]
+
+  @@id([id, version])
+}
+
+/// Current state of one intended message to one client for one document version.
+/// Retries update this row and reuse its idempotency key.
+model Delivery {
+  /// Use this ID as the provider's idempotency key for every attempt of this message.
+  id        String @id @default(cuid())
+  requestId String
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  disclosureDocumentId      String
+  disclosureDocumentVersion Int
+  disclosureDocument        DisclosureDocument @relation(fields: [disclosureDocumentId, disclosureDocumentVersion], references: [id, version], onDelete: Restrict, onUpdate: Restrict)
+
+  providerMessageId String?        @unique /// The provider's message ID, if known. Can be null for pending or skipped deliveries
+  status            DeliveryStatus @default(PENDING)
+  attemptCount      Int            @default(0)
+
+  firstAttemptAt DateTime?
+  sentAt         DateTime? /// Confirmed provider acceptance; imports use the supplied sent_at.
+  receivedAt     DateTime? /// Confirmed delivery; imported delivered rows assume sent_at.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Append-only audit history. Each row captures an event and delivery snapshots.
+model DeliveryEvent {
+  id Int @id @default(autoincrement())
+
+  deliveryId String
+  status     DeliveryStatus
+  detail     String?
+  recordedAt DateTime       @default(now())
+
+  // This is a denormalized copy of the delivery row,
+  // so that we can reconstruct the state of the delivery at any point in time
+  advisorId       String
+  advisorName     String
+  clientId        String
+  clientName      String
+  recipientEmail  String
+  fundId          String
+  fundName        String
+  documentId      String
+  documentVersion Int
+
+  // Copy of known provider identifiers
+  providerMessageId String?
+  receivedAt        DateTime?
+  sentAt            DateTime?
+}
+
+enum UserRole {
+  ADVISOR /// Can request deliveries for assigned clients and check their own requests
+  COMPLIANCE /// Can query any client's delivery history for compliance reporting
+}
+
+enum DeliveryStatus {
+  UNKNOWN
+  PENDING
+  ACCEPTED
+  DELIVERED
+  BOUNCED
+  FAILED
+}

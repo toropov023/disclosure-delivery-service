@@ -1,0 +1,66 @@
+{
+  "advisors": [
+    { "advisor_id": "adv-001", "name": "Jordan Tremblay" },
+    { "advisor_id": "adv-002", "name": "Aisha Mensah" }
+  ],
+  "compliance_users": [
+    { "user_id": "cmp-001", "name": "Rachel Bouchard" }
+  ],
+  "clients": [
+    { "client_id": "cl-101", "advisor_id": "adv-001", "name": "Elena Novak", "email": "elena.novak@example.test" },
+    { "client_id": "cl-102", "advisor_id": "adv-001", "name": "Samuel Okafor", "email": "samuel.okafor@example.test" },
+    { "client_id": "cl-103", "advisor_id": "adv-001", "name": "Grace Liu", "email": "grace.liu@example.test" },
+    { "client_id": "cl-104", "advisor_id": "adv-001", "name": "Marc Gagnon", "email": "marc.gagnon@" },
+    { "client_id": "cl-105", "advisor_id": "adv-001", "name": "Harpreet Gill", "email": "harpreet.gill@example.test" },
+    { "client_id": "cl-201", "advisor_id": "adv-002", "name": "Olivia Brennan", "email": "olivia.brennan@example.test" },
+    { "client_id": "cl-202", "advisor_id": "adv-002", "name": "Daniel Ferreira", "email": "daniel.ferreira@example.test" }
+  ],
+  "funds": [
+    { "fund_id": "fund-001", "name": "Sample Canadian Equity Fund", "document_id": "doc-001" },
+    { "fund_id": "fund-002", "name": "Sample Balanced Income Fund", "document_id": "doc-002" },
+    { "fund_id": "fund-003", "name": "Sample Global Bond Fund", "document_id": "doc-003" },
+    { "fund_id": "fund-004", "name": "Sample Growth Fund", "document_id": "doc-004" }
+  ],
+  "documents": [
+    {
+      "document_id": "doc-001",
+      "fund_id": "fund-001",
+      "versions": [
+        { "version": 1, "published_at": "2025-03-01T09:00:00Z" },
+        { "version": 2, "published_at": "2025-11-15T09:00:00Z" },
+        { "version": 3, "published_at": "2026-06-30T09:00:00Z" }
+      ]
+    },
+    {
+      "document_id": "doc-002",
+      "fund_id": "fund-002",
+      "versions": [
+        { "version": 1, "published_at": "2026-01-20T09:00:00Z" }
+      ]
+    },
+    {
+      "document_id": "doc-003",
+      "fund_id": "fund-003",
+      "versions": [
+        { "version": 1, "published_at": "2025-05-10T09:00:00Z" },
+        { "version": 2, "published_at": "2026-09-01T09:00:00Z" }
+      ]
+    },
+    {
+      "document_id": "doc-004",
+      "fund_id": "fund-004",
+      "versions": [
+        { "version": 1, "published_at": "2025-08-01T09:00:00Z" },
+        { "version": 2, "published_at": "2027-01-15T09:00:00Z" }
+      ]
+    }
+  ],
+  "delivery_history": [
+    { "client_id": "cl-101", "document_id": "doc-001", "version": 2, "provider_message_id": "msg-hist-0001", "sent_at": "2026-02-10T14:22:00Z", "status": "delivered" },
+    { "client_id": "cl-101", "document_id": "doc-002", "version": 1, "provider_message_id": "msg-hist-0002", "sent_at": "2026-03-05T16:40:00Z", "status": "delivered" },
+    { "client_id": "cl-102", "document_id": "doc-003", "version": 1, "provider_message_id": "msg-hist-0003", "sent_at": "2026-04-12T11:05:00Z", "status": "bounced" },
+    { "client_id": "cl-103", "document_id": "doc-003", "version": 2, "provider_message_id": "msg-hist-0004", "sent_at": "2026-09-10T10:15:00Z", "status": "delivered" },
+    { "client_id": "cl-201", "document_id": "doc-001", "version": 3, "provider_message_id": "msg-hist-0005", "sent_at": "2026-07-15T13:30:00Z", "status": "delivered" },
+    { "client_id": "cl-102", "document_id": "doc-002", "version": 1, "provider_message_id": "msg-hist-0006", "sent_at": "2026-03-12T15:10:00Z", "status": "bounced" }
+  ]
+}
