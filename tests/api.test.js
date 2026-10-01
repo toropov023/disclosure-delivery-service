@@ -197,6 +197,11 @@ test("HTTP fund-003 demo retries the same pending delivery and records its recei
   assert.equal(messages.size, 3);
   assert.equal(await prisma.delivery.count(), countBeforeRetry);
 
+  const rejected = await request(`/deliveries/${pending.id}/retry`, "POST");
+  assert.equal(rejected.status, 409);
+  assert.match(rejected.body.error, /Only pending or unknown/);
+  assert.equal(messages.size, 3);
+
   for (const delivery of created.body) {
     const checked = await request(`/deliveries/${delivery.id}`);
     assert.equal(
@@ -216,28 +221,6 @@ test("HTTP fund-003 demo retries the same pending delivery and records its recei
     history.body.map(({ documentId }) => documentId),
     ["doc-001", "doc-003"],
   );
-});
-
-test("HTTP retry reuses a pending delivery and rejects retrying an accepted one", async () => {
-  providerBehavior.sendError = "TRANSIENT";
-  const created = await request("/deliveries", "POST", {
-    clientId: "cl-105",
-    fundIds: ["fund-001"],
-  });
-  const [delivery] = created.body;
-  assert.equal(created.status, 200);
-  assert.equal(delivery.status, "PENDING");
-
-  providerBehavior.sendError = null;
-  const retried = await request(`/deliveries/${delivery.id}/retry`, "POST");
-  assert.equal(retried.status, 200);
-  assert.equal(retried.body.id, delivery.id);
-  assert.equal(retried.body.status, "ACCEPTED");
-  assert.equal(messages.size, 1);
-
-  const rejected = await request(`/deliveries/${delivery.id}/retry`, "POST");
-  assert.equal(rejected.status, 409);
-  assert.match(rejected.body.error, /Only pending or unknown/);
 });
 
 test("HTTP caller headers and invalid requests enforce access and return JSON errors", async () => {

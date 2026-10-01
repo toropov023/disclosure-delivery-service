@@ -1,14 +1,10 @@
 # Disclosure Delivery Service
 
-A service for delivering fund disclosure documents and tracking delivery history, built with JavaScript, Express, Prisma, and SQLite.
-
-## Requirements
-
-Install [Node.js 24 LTS](https://nodejs.org/en/download). It includes npm.
+A small JavaScript API for sending fund disclosure documents and tracking what clients received. Built with Express, Prisma, and SQLite.
 
 ## Run
 
-Download or clone this repository and open a terminal in its folder. Run:
+Requires Node.js 24 and npm.
 
 ```sh
 npm ci
@@ -16,51 +12,29 @@ npm run db:setup
 npm start
 ```
 
-Health check: [http://localhost:3000/health](http://localhost:3000/health).
+The server runs at `http://localhost:3000`. Check `GET /health` to confirm it is running. Use `npm run dev` for automatic restarts during development.
 
-Press **Ctrl+C** to stop. During development, use `npm run dev` instead of `npm start` to restart automatically when JavaScript files change.
+SQLite uses `prisma/dev.db` by default. Setup generates the Prisma client, applies migrations, and imports the supplied sample data. `npm run db:seed` reruns the import without resetting existing records.
 
-## Database
+## Project structure
 
-SQLite stores data in a local file and needs no separate installation. Prisma is configured to use `prisma/dev.db`.
+- `prisma/`: schema, migrations, and sample-data import.
+- `src/routes/` and `src/controllers/`: HTTP endpoints and request handling.
+- `src/services/`: delivery rules and compliance queries.
+- `src/utils/`: Prisma client, fake notification provider, and error helper.
+- `tests/`: service, provider, API, and import tests.
 
-`npm run db:setup` generates the Prisma client, applies migrations, and imports the supplied sample data. To rerun just the import, use `npm run db:seed`. Existing records and audit events are left unchanged.
-
-Historical deliveries keep their original client, document, and provider IDs and send times. Unknown historical advisor, name, and email values use legacy placeholders. For delivered history, receipt time is assumed to equal the supplied `sent_at`; bounced messages have no receipt time.
-
-After adding or changing models in `prisma/schema.prisma`, create a migration and generate the client:
-
-```sh
-npx prisma migrate dev --name describe_change
-npx prisma generate
-```
-
-The client is generated at `generated/prisma/client.ts` and runs directly on Node.js 24. Application code uses JavaScript.
-
-Validate the schema:
-
-```sh
-npx prisma validate
-```
+[DESIGN.md](DESIGN.md) covers the model, status flow, assumptions, and Postman walkthrough. [AI_USAGE.md](AI_USAGE.md) describes how AI was used.
 
 ## Checks
 
 ```sh
-npm run lint
-npm run lint:fix
 npm test
+npm run lint
 ```
 
-`npm run lint` checks JavaScript and formatting. `npm run lint:fix` applies automatic fixes and formats files with semicolons and double quotes.
+Tests do not change the demo database. `npm run lint:fix` applies formatting and automatic lint fixes.
 
-`npm test` runs service, provider, API, and import tests. Database tests use in-memory SQLite; API tests start a temporary local server.
+## With more time
 
-## Project files
-
-- `src/server.js` - starts the HTTP server.
-- `src/app.js` - Express setup, routes, health endpoint, and error responses.
-- `src/utils/db.js` - shared Prisma client.
-- `prisma/schema.prisma` - database model.
-- `prisma.config.js` - Prisma configuration and SQLite file location.
-- `prisma/migrations/` - database migrations.
-- `prisma/seed.js` - sample-data import entry point.
+Add real authentication, prevent concurrent duplicate sends, and use a durable provider with background status checks and recovery for uncertain deliveries.
