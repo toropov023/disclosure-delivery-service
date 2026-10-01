@@ -6,7 +6,10 @@ import { seedSampleData } from "../prisma/seed-data.js";
 import {
   messages,
   providerBehavior,
+  transientFailures,
 } from "../src/utils/notificationProvider.js";
+
+const defaultProviderStatus = providerBehavior.status;
 
 process.env.DATABASE_URL = ":memory:";
 const { prisma } = await import("../src/utils/db.js");
@@ -34,9 +37,10 @@ before(async () => {
 
 beforeEach(async () => {
   messages.clear();
+  transientFailures.clear();
   providerBehavior.sendError = null;
   providerBehavior.acceptOnTimeout = false;
-  providerBehavior.status = "accepted";
+  providerBehavior.status = defaultProviderStatus;
 
   await prisma.deliveryEvent.deleteMany();
   await prisma.delivery.deleteMany();
@@ -67,22 +71,56 @@ async function request(path, method = "GET", body, userId = "adv-001") {
   return { status: response.status, body: await response.json() };
 }
 
-test("HTTP requests send disclosures, refresh status, and return receipt history", async () => {
+test("HTTP demo accepts two documents, records delivery and bounce, and includes only receipts", async () => {
   const input = {
     clientId: "cl-105",
-    fundIds: ["fund-001"],
+    fundIds: ["fund-001", "fund-002"],
   };
   const created = await request("/deliveries", "POST", input);
 
   assert.equal(created.status, 200);
-  assert.equal(created.body.length, 1);
-  const [delivery] = created.body;
+  assert.equal(created.body.length, 2);
+  const delivery = created.body.find((item) => item.fundId === "fund-001");
+  const bounced = created.body.find((item) => item.fundId === "fund-002");
+  assert.equal(delivery.fundId, "fund-001");
   assert.equal(delivery.status, "ACCEPTED");
+  assert.equal(delivery.receivedAt, null);
+  assert.equal(bounced.status, "ACCEPTED");
+  assert.equal(bounced.receivedAt, null);
 
-  messages.get(delivery.providerMessageId).status = "delivered";
+  const initialEventCount = await prisma.deliveryEvent.count();
+  const initialDeliveryCount = await prisma.delivery.count();
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const repeated = await request("/deliveries", "POST", input);
+    assert.equal(repeated.status, 200);
+    assert.deepEqual(repeated.body, created.body);
+  }
+
+  assert.equal(messages.size, 2);
+  assert.equal(await prisma.delivery.count(), initialDeliveryCount);
+  assert.equal(await prisma.deliveryEvent.count(), initialEventCount);
+
   const refreshed = await request(`/deliveries/${delivery.id}`);
   assert.equal(refreshed.status, 200);
   assert.equal(refreshed.body.status, "DELIVERED");
+
+  const failed = await request(`/deliveries/${bounced.id}`);
+  assert.equal(failed.status, 200);
+  assert.equal(failed.body.status, "BOUNCED");
+  assert.equal(failed.body.receivedAt, null);
+  assert.equal(messages.size, 2);
+
+  const eventCount = await prisma.deliveryEvent.count();
+  assert.deepEqual(
+    (await request(`/deliveries/${delivery.id}`)).body,
+    refreshed.body,
+  );
+  assert.deepEqual(
+    (await request(`/deliveries/${bounced.id}`)).body,
+    failed.body,
+  );
+  assert.equal(await prisma.deliveryEvent.count(), eventCount);
 
   const history = await request(
     `/clients/cl-105/disclosures?asOf=${encodeURIComponent(refreshed.body.receivedAt)}`,
@@ -96,6 +134,87 @@ test("HTTP requests send disclosures, refresh status, and return receipt history
   assert.equal(
     history.body[0].documentVersion,
     delivery.disclosureDocumentVersion,
+  );
+
+  const repeated = await request("/deliveries", "POST", {
+    ...input,
+    fundIds: ["fund-001"],
+  });
+  assert.equal(repeated.status, 200);
+  assert.deepEqual(repeated.body, []);
+  assert.equal(messages.size, 2);
+
+  const replacement = await request("/deliveries", "POST", input);
+  assert.equal(replacement.status, 200);
+  assert.equal(replacement.body.length, 1);
+  assert.equal(replacement.body[0].fundId, "fund-002");
+  assert.equal(replacement.body[0].status, "ACCEPTED");
+  assert.notEqual(replacement.body[0].id, bounced.id);
+  assert.equal(messages.size, 3);
+
+  const reused = await request("/deliveries", "POST", input);
+  assert.equal(reused.status, 200);
+  assert.deepEqual(reused.body, replacement.body);
+  assert.equal(messages.size, 3);
+});
+
+test("HTTP fund-003 demo retries the same pending delivery and records its receipt", async () => {
+  const input = {
+    clientId: "cl-105",
+    fundIds: ["fund-001", "fund-002", "fund-003"],
+  };
+  const created = await request("/deliveries", "POST", input);
+  assert.equal(created.status, 200);
+  assert.deepEqual(
+    created.body.map(({ status }) => status),
+    ["ACCEPTED", "ACCEPTED", "PENDING"],
+  );
+  const pending = created.body.find(({ fundId }) => fundId === "fund-003");
+  assert.equal(pending.providerMessageId, null);
+  assert.equal(messages.size, 2);
+  assert.deepEqual(
+    (await request("/deliveries", "POST", input)).body,
+    created.body,
+  );
+  const eventsBeforeCheck = await prisma.deliveryEvent.count();
+  assert.equal(
+    (await request(`/deliveries/${pending.id}`)).body.status,
+    "PENDING",
+  );
+  assert.equal(await prisma.deliveryEvent.count(), eventsBeforeCheck);
+
+  const countBeforeRetry = await prisma.delivery.count();
+  const retried = await request(`/deliveries/${pending.id}/retry`, "POST");
+  assert.equal(retried.status, 200);
+  assert.equal(retried.body.id, pending.id);
+  assert.equal(retried.body.status, "ACCEPTED");
+  assert.equal(retried.body.attemptCount, 2);
+  assert.equal(retried.body.receivedAt, null);
+  assert.equal(
+    messages.get(retried.body.providerMessageId).idempotencyKey,
+    pending.id,
+  );
+  assert.equal(messages.size, 3);
+  assert.equal(await prisma.delivery.count(), countBeforeRetry);
+
+  for (const delivery of created.body) {
+    const checked = await request(`/deliveries/${delivery.id}`);
+    assert.equal(
+      checked.body.status,
+      delivery.fundId === "fund-002" ? "BOUNCED" : "DELIVERED",
+    );
+  }
+
+  const history = await request(
+    `/clients/cl-105/disclosures?asOf=${encodeURIComponent(new Date().toISOString())}`,
+    "GET",
+    undefined,
+    "cmp-001",
+  );
+  assert.equal(history.status, 200);
+  assert.deepEqual(
+    history.body.map(({ documentId }) => documentId),
+    ["doc-001", "doc-003"],
   );
 });
 

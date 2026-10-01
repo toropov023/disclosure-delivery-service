@@ -10,7 +10,7 @@ import { getCurrentDisclosures } from "./disclosureService.js";
  * @param {string} advisorId - Advisor making the request
  * @param {string} clientId - One of the advisor's clients
  * @param {string[]} fundIds - Funds whose current disclosures are needed
- * @returns {Promise<Delivery[]>} New or active deliveries; received versions are omitted
+ * @returns {Promise<Delivery[]>} New or active deliveries with fundId; received versions are omitted
  */
 export async function deliverDisclosures(advisorId, clientId, fundIds) {
   if (!advisorId || !clientId) {
@@ -57,18 +57,10 @@ export async function deliverDisclosures(advisorId, clientId, fundIds) {
       },
     });
 
-    // Refresh an active delivery before deciding whether another send is needed
+    // Reuse active deliveries; only the status endpoint checks the provider
     if (active) {
-      const refreshed = await getDeliveryStatus(advisorId, active.id);
-
-      if (refreshed.status === "DELIVERED") {
-        continue;
-      }
-
-      if (refreshed.status !== "BOUNCED") {
-        deliveries.push(refreshed);
-        continue;
-      }
+      deliveries.push({ ...active, fundId: document.fundId });
+      continue;
     }
 
     const fund = await prisma.fund.findUniqueOrThrow({
@@ -97,7 +89,10 @@ export async function deliverDisclosures(advisorId, clientId, fundIds) {
       "Delivery requested.",
     );
 
-    deliveries.push(await sendDelivery(delivery));
+    deliveries.push({
+      ...(await sendDelivery(delivery)),
+      fundId: document.fundId,
+    });
   }
 
   return deliveries;
@@ -112,6 +107,15 @@ export async function deliverDisclosures(advisorId, clientId, fundIds) {
 export async function getDeliveryStatus(advisorId, deliveryId) {
   const delivery = await getOwnedDelivery(advisorId, deliveryId);
 
+  return refreshDeliveryStatus(delivery);
+}
+
+/**
+ * Check an accepted message with the provider and record any status change
+ * @param {Delivery} delivery
+ * @returns {Promise<Delivery>} Current delivery state
+ */
+async function refreshDeliveryStatus(delivery) {
   // Only accepted deliveries need a provider status check
   if (delivery.status !== "ACCEPTED") {
     return delivery;
@@ -127,13 +131,13 @@ export async function getDeliveryStatus(advisorId, deliveryId) {
   }
 
   const snapshot = await prisma.deliveryEvent.findFirstOrThrow({
-    where: { deliveryId },
+    where: { deliveryId: delivery.id },
     orderBy: { id: "asc" },
   });
 
   // record the status update
   return saveDelivery(
-    deliveryId,
+    delivery.id,
     { status, receivedAt: status === "DELIVERED" ? new Date() : null },
     snapshot,
     `Provider reports ${status.toLowerCase()}.`,

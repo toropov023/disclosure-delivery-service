@@ -37,11 +37,10 @@ npx prisma generate
 
 The client is generated at `generated/prisma/client.ts` and runs directly on Node.js 24. Application code uses JavaScript.
 
-Validate the schema or browse the database:
+Validate the schema:
 
 ```sh
 npx prisma validate
-npx prisma studio
 ```
 
 ## Checks

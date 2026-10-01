@@ -59,13 +59,16 @@ test("sends missing current versions and respects delivered or bounced sample hi
   ]);
 
   assert.deepEqual(
-    deliveries.map(({ disclosureDocumentId, disclosureDocumentVersion }) => [
-      disclosureDocumentId,
-      disclosureDocumentVersion,
-    ]),
+    deliveries.map(
+      ({ fundId, disclosureDocumentId, disclosureDocumentVersion }) => [
+        fundId,
+        disclosureDocumentId,
+        disclosureDocumentVersion,
+      ],
+    ),
     [
-      ["doc-001", 3],
-      ["doc-004", 1],
+      ["fund-001", "doc-001", 3],
+      ["fund-004", "doc-004", 1],
     ],
   );
   assert.equal(deliveries[0].requestId, deliveries[1].requestId);
@@ -113,10 +116,20 @@ test("repeated requests reuse active deliveries, skip receipts, and replace boun
   assert.deepEqual(repeated, deliveries);
   assert.equal(messages.size, 2);
 
-  // A new request skips a newly confirmed receipt and replaces a newly found bounce.
+  // Provider outcomes are not observed until an explicit status check.
   messages.get(deliveries[0].providerMessageId).status = "delivered";
   messages.get(deliveries[1].providerMessageId).status = "bounced";
 
+  assert.deepEqual(
+    await deliverDisclosures("adv-001", "cl-105", ["fund-001", "fund-002"]),
+    deliveries,
+  );
+  assert.equal(messages.size, 2);
+
+  await getDeliveryStatus("adv-001", deliveries[0].id);
+  await getDeliveryStatus("adv-001", deliveries[1].id);
+
+  // A new request skips the confirmed receipt and replaces the confirmed bounce.
   const replacements = await deliverDisclosures("adv-001", "cl-105", [
     "fund-001",
     "fund-002",

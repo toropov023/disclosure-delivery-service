@@ -55,7 +55,7 @@ model DisclosureDocument {
 model Delivery {
   /// Use this ID as the provider's idempotency key for every attempt of this message.
   id        String @id @default(cuid())
-  requestId String
+  requestId String /// Links multple deliveries to the same request
 
   clientId String
   client   Client @relation(fields: [clientId], references: [id], onDelete: Restrict, onUpdate: Restrict)
@@ -109,10 +109,11 @@ enum UserRole {
 }
 
 enum DeliveryStatus {
-  UNKNOWN
-  PENDING
-  ACCEPTED
-  DELIVERED
-  BOUNCED
-  FAILED
+  PENDING /// Created the delivery record but haven’t started sending
+  UNKNOWN /// Set before the provider call. The provider may have accepted it, but we don’t know yet
+  FAILED /// The provider rejected the send with a permanent error, such as an invalid recipient. Retrying won’t help
+  ACCEPTED /// The provider accepted the message and will attempt delivery. Doesn't confirm that the client received it
+
+  DELIVERED /// The provider confirmed delivery
+  BOUNCED /// The provider confirmed that the client’s email bounced
 }

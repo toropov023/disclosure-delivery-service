@@ -5,9 +5,19 @@ export const providerBehavior = {
   /** @type {null | "TRANSIENT" | "PERMANENT" | "TIMEOUT"} */
   sendError: null,
   acceptOnTimeout: false, // whether acceptance happened before the response was lost
-  /** @type {"accepted" | "delivered" | "bounced"} */
-  status: "accepted",
+  /** @type {null | "accepted" | "delivered" | "bounced"} */
+  status: null, // Null uses the document outcomes below; tests can override it.
 };
+
+// Deterministic demo outcomes, observed only when querying an accepted message.
+const demoStatuses = {
+  "doc-001": "delivered",
+  "doc-002": "bounced",
+  "doc-003": "delivered",
+};
+
+// Remember the one simulated failure per intended doc-003 message until restart.
+export const transientFailures = new Set();
 
 // Accepted messages, keyed by ID. Tests can change a message's status or acceptedAt.
 export const messages = new Map();
@@ -50,6 +60,20 @@ export async function send(
   }
 
   const { sendError, acceptOnTimeout } = providerBehavior;
+
+  if (
+    !sendError &&
+    documentId === "doc-003" &&
+    !previous &&
+    !transientFailures.has(idempotencyKey)
+  ) {
+    transientFailures.add(idempotencyKey);
+    throw providerError(
+      "TRANSIENT",
+      "Simulated first-attempt failure for doc-003.",
+    );
+  }
+
   let messageId;
 
   // A timeout can happen after acceptance, before the caller receives the ID
@@ -76,9 +100,16 @@ export async function send(
   return messageId;
 }
 
-/** Return the message's test status, or the configured default (also for imported IDs). */
+/** Return a test override or demo outcome; unknown/imported IDs remain accepted. */
 export async function getStatus(messageId) {
-  return messages.get(messageId)?.status ?? providerBehavior.status;
+  const message = messages.get(messageId);
+
+  return (
+    message?.status ??
+    providerBehavior.status ??
+    demoStatuses[message?.documentId] ??
+    "accepted"
+  );
 }
 
 function providerError(code, message) {
