@@ -1,4 +1,4 @@
-import { prisma } from "../src/db.js";
+import { prisma } from "../src/utils/db.js";
 import { seedSampleData } from "./seed-data.js";
 
 try {

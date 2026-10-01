@@ -59,7 +59,7 @@ npm test
 ## Project files
 
 - `src/server.js` - Express server and health endpoint.
-- `src/db.js` - shared Prisma client.
+- `src/utils/db.js` - shared Prisma client.
 - `prisma/schema.prisma` - database model.
 - `prisma.config.js` - Prisma configuration and SQLite file location.
 - `prisma/migrations/` - database migrations.
