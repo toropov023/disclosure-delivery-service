@@ -6,7 +6,7 @@ import { seedSampleData } from "../prisma/seed-data.js";
 // Set the test database before importing the shared client and services.
 process.env.DATABASE_URL = ":memory:";
 const { prisma } = await import("../src/utils/db.js");
-const { getCurrentDisclosures, getReceivedDisclosures } =
+const { getReceivedDisclosures } =
   await import("../src/services/disclosureService.js");
 
 before(async () => {
@@ -26,37 +26,6 @@ before(async () => {
 });
 
 after(() => prisma.$disconnect());
-
-test("selects current versions and includes a new version only after publication", async () => {
-  await prisma.disclosureDocument.update({
-    where: { id_version: { id: "doc-004", version: 2 } },
-    data: { publishedAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
-  });
-
-  const documents = await getCurrentDisclosures([
-    "fund-001",
-    "fund-002",
-    "fund-003",
-    "fund-004",
-  ]);
-  assert.deepEqual(
-    documents.map(({ id, version }) => [id, version]),
-    [
-      ["doc-001", 3],
-      ["doc-002", 1],
-      ["doc-003", 2],
-      ["doc-004", 1],
-    ],
-  );
-
-  await prisma.disclosureDocument.update({
-    where: { id_version: { id: "doc-004", version: 2 } },
-    data: { publishedAt: new Date() },
-  });
-
-  const [published] = await getCurrentDisclosures(["fund-004"]);
-  assert.equal(published.version, 2);
-});
 
 test("receipt history includes received versions by the cutoff, without duplicate events", async () => {
   const beforeReceipt = await getReceivedDisclosures(

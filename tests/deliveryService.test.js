@@ -46,7 +46,7 @@ beforeEach(async () => {
 
 after(() => prisma.$disconnect());
 
-test("sends current versions, skips imported receipts, and reuses active deliveries", async () => {
+test("sends missing current versions and respects delivered or bounced sample history", async () => {
   await prisma.disclosureDocument.update({
     where: { id_version: { id: "doc-004", version: 2 } },
     data: { publishedAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
@@ -76,16 +76,39 @@ test("sends current versions, skips imported receipts, and reuses active deliver
     assert.equal(delivery.attemptCount, 1);
     assert.ok(delivery.sentAt instanceof Date);
     assert.equal(delivery.receivedAt, null);
-    assert.equal(
-      messages.get(delivery.providerMessageId).idempotencyKey,
-      delivery.id,
-    );
+    const message = messages.get(delivery.providerMessageId);
+    assert.equal(message.idempotencyKey, delivery.id);
+    assert.equal(message.recipientEmail, "elena.novak@example.test");
+    assert.equal(message.documentId, delivery.disclosureDocumentId);
+    assert.equal(message.version, delivery.disclosureDocumentVersion);
   }
 
-  const repeated = await deliverDisclosures("adv-001", "cl-101", [
+  // A receipt of the current version means nothing needs sending.
+  assert.deepEqual(
+    await deliverDisclosures("adv-002", "cl-201", ["fund-001"]),
+    [],
+  );
+  assert.equal(messages.size, 2);
+
+  // The sample's bounced current version must still be sent.
+  const [replacement] = await deliverDisclosures("adv-001", "cl-102", [
+    "fund-002",
+  ]);
+  assert.equal(replacement.disclosureDocumentId, "doc-002");
+  assert.equal(replacement.disclosureDocumentVersion, 1);
+  assert.equal(replacement.status, "ACCEPTED");
+  assert.notEqual(replacement.providerMessageId, "msg-hist-0006");
+  assert.equal(messages.size, 3);
+});
+
+test("repeated requests reuse active deliveries, skip receipts, and replace bounces", async () => {
+  const deliveries = await deliverDisclosures("adv-001", "cl-105", [
     "fund-001",
     "fund-002",
-    "fund-004",
+  ]);
+  const repeated = await deliverDisclosures("adv-001", "cl-105", [
+    "fund-001",
+    "fund-002",
   ]);
   assert.deepEqual(repeated, deliveries);
   assert.equal(messages.size, 2);
@@ -94,14 +117,13 @@ test("sends current versions, skips imported receipts, and reuses active deliver
   messages.get(deliveries[0].providerMessageId).status = "delivered";
   messages.get(deliveries[1].providerMessageId).status = "bounced";
 
-  const replacements = await deliverDisclosures("adv-001", "cl-101", [
+  const replacements = await deliverDisclosures("adv-001", "cl-105", [
     "fund-001",
     "fund-002",
-    "fund-004",
   ]);
 
   assert.equal(replacements.length, 1);
-  assert.equal(replacements[0].disclosureDocumentId, "doc-004");
+  assert.equal(replacements[0].disclosureDocumentId, "doc-002");
   assert.equal(replacements[0].status, "ACCEPTED");
   assert.notEqual(replacements[0].id, deliveries[1].id);
   assert.equal(messages.size, 3);
@@ -109,11 +131,54 @@ test("sends current versions, skips imported receipts, and reuses active deliver
     (await getDeliveryStatus("adv-001", deliveries[1].id)).status,
     "BOUNCED",
   );
+});
 
-  // The supplied history already contains this client's current version.
+test("a newly published version is sent even after the previous version was received", async () => {
+  await prisma.disclosureDocument.update({
+    where: { id_version: { id: "doc-004", version: 2 } },
+    data: { publishedAt: new Date(Date.now() + 24 * 60 * 60 * 1000) },
+  });
+
+  const [original] = await deliverDisclosures("adv-001", "cl-105", [
+    "fund-004",
+  ]);
+  assert.equal(original.disclosureDocumentVersion, 1);
+
+  messages.get(original.providerMessageId).status = "delivered";
+  await getDeliveryStatus("adv-001", original.id);
   assert.deepEqual(
-    await deliverDisclosures("adv-002", "cl-201", ["fund-001"]),
+    await deliverDisclosures("adv-001", "cl-105", ["fund-004"]),
     [],
+  );
+  assert.equal(messages.size, 1);
+
+  await prisma.disclosureDocument.update({
+    where: { id_version: { id: "doc-004", version: 2 } },
+    data: { publishedAt: new Date() },
+  });
+
+  const [updated] = await deliverDisclosures("adv-001", "cl-105", ["fund-004"]);
+  assert.equal(updated.disclosureDocumentId, original.disclosureDocumentId);
+  assert.equal(updated.disclosureDocumentVersion, 2);
+  assert.equal(updated.status, "ACCEPTED");
+  assert.notEqual(updated.id, original.id);
+  assert.equal(messages.size, 2);
+
+  const originalMessage = messages.get(original.providerMessageId);
+  const updatedMessage = messages.get(updated.providerMessageId);
+  assert.equal(originalMessage.version, 1);
+  assert.equal(updatedMessage.version, 2);
+  assert.equal(updatedMessage.idempotencyKey, updated.id);
+  assert.notEqual(
+    updatedMessage.idempotencyKey,
+    originalMessage.idempotencyKey,
+  );
+
+  // Acceptance of version 2 must not become receipt evidence for version 2.
+  const history = await getReceivedDisclosures("cmp-001", "cl-105", new Date());
+  assert.deepEqual(
+    history.map(({ documentVersion }) => documentVersion),
+    [1],
   );
 });
 
@@ -226,6 +291,10 @@ test("a transient error can be retried using the same delivery", async () => {
 
   assert.equal(pending.status, "PENDING");
   assert.equal(messages.size, 0);
+  assert.deepEqual(
+    await getReceivedDisclosures("cmp-001", "cl-105", new Date()),
+    [],
+  );
 
   providerBehavior.sendError = null;
   const accepted = await retryDelivery("adv-001", pending.id);
@@ -243,6 +312,10 @@ test("a permanent error fails the delivery and cannot be retried", async () => {
   assert.equal(failed.status, "FAILED");
   assert.equal(failed.sentAt, null);
   assert.equal(messages.size, 0);
+  assert.deepEqual(
+    await getReceivedDisclosures("cmp-001", "cl-104", new Date()),
+    [],
+  );
 
   providerBehavior.sendError = null;
   await assert.rejects(
@@ -253,7 +326,11 @@ test("a permanent error fails the delivery and cannot be retried", async () => {
 });
 
 for (const acceptedBeforeTimeout of [false, true]) {
-  test(`recovers a timeout with acceptance=${acceptedBeforeTimeout} without duplicates`, async () => {
+  const scenario = acceptedBeforeTimeout
+    ? "a timeout after acceptance recovers the original message without duplicates"
+    : "a timeout before acceptance retries as a new send with the same key";
+
+  test(scenario, async () => {
     providerBehavior.sendError = "TIMEOUT";
     providerBehavior.acceptOnTimeout = acceptedBeforeTimeout;
     const [unknown] = await deliverDisclosures("adv-001", "cl-105", [
@@ -265,6 +342,10 @@ for (const acceptedBeforeTimeout of [false, true]) {
     assert.equal(unknown.providerMessageId, null);
     assert.equal(unknown.receivedAt, null);
     assert.equal(messages.size, acceptedBeforeTimeout ? 1 : 0);
+    assert.deepEqual(
+      await getReceivedDisclosures("cmp-001", "cl-105", new Date()),
+      [],
+    );
 
     providerBehavior.sendError = null;
     const [existing] = await deliverDisclosures("adv-001", "cl-105", [
@@ -277,12 +358,40 @@ for (const acceptedBeforeTimeout of [false, true]) {
     assert.equal(recovered.status, "ACCEPTED");
     assert.equal(recovered.id, unknown.id);
     assert.equal(messages.size, 1);
+    assert.equal(
+      messages.get(recovered.providerMessageId).idempotencyKey,
+      unknown.id,
+    );
 
     if (acceptedBeforeTimeout) {
       assert.equal(recovered.providerMessageId, originalMessageId);
     }
   });
 }
+
+test("retry errors do not erase uncertainty about an earlier timeout", async () => {
+  providerBehavior.sendError = "TIMEOUT";
+  const [unknown] = await deliverDisclosures("adv-001", "cl-105", ["fund-001"]);
+
+  // A later failure says nothing about whether the timed-out attempt was accepted.
+  for (const code of ["TRANSIENT", "PERMANENT"]) {
+    providerBehavior.sendError = code;
+    const retried = await retryDelivery("adv-001", unknown.id);
+
+    assert.equal(retried.id, unknown.id);
+    assert.equal(retried.status, "UNKNOWN");
+    assert.equal(retried.receivedAt, null);
+
+    const event = await prisma.deliveryEvent.findFirstOrThrow({
+      where: { deliveryId: unknown.id },
+      orderBy: { id: "desc" },
+    });
+    assert.equal(event.status, "UNKNOWN");
+    assert.equal(event.detail, `Simulated ${code.toLowerCase()} error.`);
+  }
+
+  assert.equal(messages.size, 0);
+});
 
 test("an expired unknown outcome is not resent with a fresh idempotency window", async () => {
   providerBehavior.sendError = "TIMEOUT";

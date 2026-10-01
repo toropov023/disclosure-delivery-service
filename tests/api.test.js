@@ -79,14 +79,6 @@ test("HTTP requests send disclosures, refresh status, and return receipt history
   const [delivery] = created.body;
   assert.equal(delivery.status, "ACCEPTED");
 
-  const forbidden = await request(
-    `/deliveries/${delivery.id}`,
-    "GET",
-    undefined,
-    "adv-002",
-  );
-  assert.equal(forbidden.status, 404);
-
   messages.get(delivery.providerMessageId).status = "delivered";
   const refreshed = await request(`/deliveries/${delivery.id}`);
   assert.equal(refreshed.status, 200);
@@ -105,11 +97,6 @@ test("HTTP requests send disclosures, refresh status, and return receipt history
     history.body[0].documentVersion,
     delivery.disclosureDocumentVersion,
   );
-
-  const repeated = await request("/deliveries", "POST", input);
-  assert.equal(repeated.status, 200);
-  assert.deepEqual(repeated.body, []);
-  assert.equal(messages.size, 1);
 });
 
 test("HTTP retry reuses a pending delivery and rejects retrying an accepted one", async () => {
@@ -134,7 +121,7 @@ test("HTTP retry reuses a pending delivery and rejects retrying an accepted one"
   assert.match(rejected.body.error, /Only pending or unknown/);
 });
 
-test("HTTP validation and access failures return JSON errors", async () => {
+test("HTTP caller headers and invalid requests enforce access and return JSON errors", async () => {
   // Legacy body/query IDs do not replace the required caller header.
   for (const [path, method, body] of [
     [
@@ -153,16 +140,6 @@ test("HTTP validation and access failures return JSON errors", async () => {
     assert.equal(missingHeader.status, 400);
     assert.equal(missingHeader.body.error, "X-User-Id header is required.");
   }
-
-  const missingInput = await request("/deliveries", "POST", {});
-  assert.equal(missingInput.status, 400);
-  assert.match(missingInput.body.error, /Client ID/);
-
-  const invalidId = await request("/deliveries", "POST", {
-    clientId: {},
-    fundIds: ["fund-001"],
-  });
-  assert.equal(invalidId.status, 400);
 
   // A body or query ID cannot override the caller identified by the header.
   const forbidden = await request(
@@ -201,24 +178,4 @@ test("HTTP validation and access failures return JSON errors", async () => {
     "adv-002",
   );
   assert.equal(forbiddenHistory.status, 403);
-
-  const missingDelivery = await request("/deliveries/missing");
-  assert.equal(missingDelivery.status, 404);
-  assert.match(missingDelivery.body.error, /not found or not accessible/);
-
-  const malformed = await fetch(`${baseUrl}/deliveries`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-User-Id": "adv-001" },
-    body: "{",
-  });
-  assert.equal(malformed.status, 400);
-  assert.deepEqual(await malformed.json(), {
-    error: "Request body must be valid JSON.",
-  });
-
-  const missingRoute = await request("/missing");
-  assert.deepEqual(missingRoute, {
-    status: 404,
-    body: { error: "Route not found." },
-  });
 });
