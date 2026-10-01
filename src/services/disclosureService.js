@@ -1,4 +1,5 @@
 import { prisma } from "../utils/db.js";
+import { httpError } from "../utils/httpError.js";
 
 /**
  * Find the highest published version for each requested fund
@@ -11,7 +12,7 @@ export async function getCurrentDisclosures(fundIds) {
     !fundIds.length ||
     fundIds.some((id) => typeof id !== "string" || !id.trim())
   ) {
-    throw new Error("Provide at least one fund ID.");
+    throw httpError(400, "Provide at least one fund ID.");
   }
 
   const documents = await prisma.disclosureDocument.findMany({
@@ -22,7 +23,7 @@ export async function getCurrentDisclosures(fundIds) {
 
   for (const fundId of fundIds) {
     if (!documents.some((document) => document.fundId === fundId)) {
-      throw new Error(`No published disclosure found for fund ${fundId}.`);
+      throw httpError(404, `No published disclosure found for fund ${fundId}.`);
     }
   }
 
@@ -38,13 +39,13 @@ export async function getCurrentDisclosures(fundIds) {
  */
 export async function getReceivedDisclosures(userId, clientId, asOf) {
   if (!userId || !clientId) {
-    throw new Error("User ID and client ID are required.");
+    throw httpError(400, "User ID and client ID are required.");
   }
 
   const cutoff = new Date(asOf);
 
   if (asOf == null || Number.isNaN(cutoff.getTime())) {
-    throw new Error("A valid as-of date is required.");
+    throw httpError(400, "A valid as-of date is required.");
   }
 
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -53,12 +54,14 @@ export async function getReceivedDisclosures(userId, clientId, asOf) {
     const client = await prisma.client.findUnique({ where: { id: clientId } });
 
     if (client?.advisorId !== user.id) {
-      throw new Error(
+      throw httpError(
+        403,
         "Advisors can only query receipt history for their own clients.",
       );
     }
   } else if (user?.role !== "COMPLIANCE") {
-    throw new Error(
+    throw httpError(
+      403,
       "An advisor or compliance user is required to query receipt history.",
     );
   }

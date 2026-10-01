@@ -54,11 +54,12 @@ npm test
 
 `npm run lint` checks JavaScript and formatting. `npm run lint:fix` applies automatic fixes and formats files with semicolons and double quotes.
 
-`npm test` runs database import tests using fresh in-memory SQLite databases.
+`npm test` runs service, provider, API, and import tests. Database tests use in-memory SQLite; API tests start a temporary local server.
 
 ## Project files
 
-- `src/server.js` - Express server and health endpoint.
+- `src/server.js` - starts the HTTP server.
+- `src/app.js` - Express setup, routes, health endpoint, and error responses.
 - `src/utils/db.js` - shared Prisma client.
 - `prisma/schema.prisma` - database model.
 - `prisma.config.js` - Prisma configuration and SQLite file location.

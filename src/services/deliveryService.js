@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { prisma } from "../utils/db.js";
+import { httpError } from "../utils/httpError.js";
 import * as notificationProvider from "../utils/notificationProvider.js";
 import { getCurrentDisclosures } from "./disclosureService.js";
 
@@ -13,7 +14,7 @@ import { getCurrentDisclosures } from "./disclosureService.js";
  */
 export async function deliverDisclosures(advisorId, clientId, fundIds) {
   if (!advisorId || !clientId) {
-    throw new Error("Advisor ID and client ID are required.");
+    throw httpError(400, "Advisor ID and client ID are required.");
   }
 
   const client = await prisma.client.findFirst({
@@ -22,7 +23,10 @@ export async function deliverDisclosures(advisorId, clientId, fundIds) {
   });
 
   if (!client) {
-    throw new Error("Advisors can only send disclosures to their own clients.");
+    throw httpError(
+      403,
+      "Advisors can only send disclosures to their own clients.",
+    );
   }
 
   const documents = await getCurrentDisclosures(fundIds);
@@ -146,7 +150,7 @@ export async function retryDelivery(advisorId, deliveryId) {
   const delivery = await getOwnedDelivery(advisorId, deliveryId);
 
   if (!["PENDING", "UNKNOWN"].includes(delivery.status)) {
-    throw new Error("Only pending or unknown deliveries can be retried.");
+    throw httpError(409, "Only pending or unknown deliveries can be retried.");
   }
 
   return sendDelivery(delivery);
@@ -160,7 +164,7 @@ export async function retryDelivery(advisorId, deliveryId) {
  */
 async function getOwnedDelivery(advisorId, deliveryId) {
   if (!advisorId || !deliveryId) {
-    throw new Error("Advisor ID and delivery ID are required.");
+    throw httpError(400, "Advisor ID and delivery ID are required.");
   }
 
   const delivery = await prisma.delivery.findFirst({
@@ -171,7 +175,10 @@ async function getOwnedDelivery(advisorId, deliveryId) {
   });
 
   if (!delivery) {
-    throw new Error("Delivery not found or not accessible to this advisor.");
+    throw httpError(
+      404,
+      "Delivery not found or not accessible to this advisor.",
+    );
   }
 
   return delivery;
@@ -189,7 +196,8 @@ async function sendDelivery(delivery) {
       Date.now() - delivery.firstAttemptAt.getTime() >=
         notificationProvider.IDEMPOTENCY_WINDOW_MS)
   ) {
-    throw new Error(
+    throw httpError(
+      409,
       "Delivery outcome is unknown and the 24-hour retry window has expired. Manual review is required.",
     );
   }
